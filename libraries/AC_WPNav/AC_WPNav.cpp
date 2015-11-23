@@ -562,18 +562,23 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
     							curr_vel.y * _pos_delta_unit.y +
 									curr_vel.z * _pos_delta_unit.z;
 
-    //this comment below is strange, cant work out what the diff is
+    //this comment below is strange, can't work out what the diff is
     // calculate point at which velocity switches from linear to sqrt
 
-    // _wp_speed_cms is the user defined maximum velocity, comes from the WPNAV_SPEED setting.
+    // _wp_speed_cms is the user defined maximum horizontal velocity, comes from the WPNAV_SPEED setting.
     // it can be overridden at run time by AC_WPNav::set_speed_xy()
-    // linear_verlocity - this is the velocity in the horizontal plane (xy), its ignores the vertical (z).
-    // Could use a better variable name
+    // linear_verlocity - this is the desired velocity in the horizontal plane (xy), its ignores the vertical (z).
+    // Could use a better variable name . vel_desired_xy
     float linear_velocity = _wp_speed_cms;
 
     // kP is the user defined POS_XY_P value.
     // its is the proportional gain applied to the position error to derive a desired velocity.
     float kP = _pos_control.get_pos_xy_kP();
+
+    // _track_accel has been pre-defined by the call to AC_WPNav::calculate_wp_leash_length
+    // if we have defined a kP greater than zero, then we will calculate the desired velocity by dividing
+    // the accel by the kP. I don't see whay we want to do this when we have the desired velocity defined above.
+    //
     if (kP >= 0.0f) {   // avoid divide by zero
         linear_velocity = _track_accel/kP;
     }
