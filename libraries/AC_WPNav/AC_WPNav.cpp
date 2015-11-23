@@ -440,75 +440,147 @@ void AC_WPNav::shift_wp_origin_to_current_pos()
     _pos_control.freeze_ff_xy();
     _pos_control.freeze_ff_z();
 }
-
+/// **********************************************************************************************
+///
+/// 					get_wp_stopping_point_xy -
+///
+/// **********************************************************************************************
 /// get_wp_stopping_point_xy - returns vector to stopping point based on a horizontal position and velocity
 void AC_WPNav::get_wp_stopping_point_xy(Vector3f& stopping_point) const
 {
 	_pos_control.get_stopping_point_xy(stopping_point);
 }
-
-/// advance_wp_target_along_track - move target location along track from origin to destination
+/// **********************************************************************************************
+///
+/// 					advance_wp_target_along_track -
+///
+/// **********************************************************************************************
+/// move a target point along track from origin to destination
+/// This is here the magic happens in the wp code.
+/// It determines the required heading and speed that the vehicle should adopt to
+/// advance along the track and reach the destination.
+/// Called on a schedule by AC_WPNav.update_nav()
 void AC_WPNav::advance_wp_target_along_track(float dt)
 {
-    float track_covered;        // distance (in cm) along the track that the vehicle has traveled.  Measured by drawing a perpendicular line from the track to the vehicle.
-    Vector3f track_error;       // distance error (in cm) from the track_covered position (i.e. closest point on the line to the vehicle) and the vehicle
-    float track_desired_max;    // the farthest distance (in cm) along the track that the leash will allow
-    float track_leash_slack;    // additional distance (in cm) along the track from our track_covered position that our leash will allow
-    bool reached_leash_limit = false;   // true when track has reached leash limit and we need to slow down the target point
+	// distance (cm) along the track from the origin that the vehicle has traveled. This ignores the track error.
+	float track_covered;
 
-    // get current location
+	// distance error (cm) from the track position and the vehicle ( how far off track the vehicle is sitting)
+	Vector3f track_error;
+
+	// the farthest distance (cm) ahead of the vehicles present track position that the next target position can lie.
+	// This ignores track error.
+    float track_desired_max;
+
+    // distance (cm)ahead of the vehicles present track position that the next target position can lie .
+    // This takes into account the vehicles present track error.
+    float track_leash_slack;
+
+    // true when track error is beyond the leash limit and we need to head straight to the track
+     bool reached_leash_limit = false;
+
+    // Get the vehicles current location relative to the home location.
     Vector3f curr_pos = _inav.get_position();
+
+    // Now work out where the vehicle is positioned relative to the track origin.
+    // The aircraft could be several meters off track to one side.
+    // curr_delta is the shortest distance between the track origin and the vehicles current position.
     Vector3f curr_delta = curr_pos - _origin;
 
-    // calculate how far along the track we are
+    // calculate how far along the track the vehicle is positioned.
+    // It could be several meters to one side of track due to drift.
+    // We want to know the distance along the track that the vehicle has moved ignoring the track error.
     track_covered = curr_delta.x * _pos_delta_unit.x + curr_delta.y * _pos_delta_unit.y + curr_delta.z * _pos_delta_unit.z;
 
+    // The point on the track where the vehicle would be sitting if we ignored the track error.
     Vector3f track_covered_pos = _pos_delta_unit * track_covered;
+
+
+    // Knowing how far along the track the vehicle is, We can calculate how far off track it is.
+    // track_error represents x,y,z in cm and is the shortest distance from the track. (90 deg to the track)
     track_error = curr_delta - track_covered_pos;
 
-    // calculate the horizontal error
+    // calculate the horizontal track error that is 90 deg to the track.
+    // we don't care which of the track it is on. The result will always be positive.
     float track_error_xy = pythagorous2(track_error.x, track_error.y);
 
-    // calculate the vertical error
+    // calculate the vertical track error, as for track_error_xy. It is a positive distance 90 deg from the track.
     float track_error_z = fabsf(track_error.z);
 
-    // get position control leash lengths
+
+    // A leash is a point ahead of the vehicles current position.
+    // That point will always be between the current position and destination.
+    // Think of a dog racing ahead of you trying to get onto the path and head home. you only allow him to go so far on his leash.
+    // Depending on how long the leash is, we can determine when the next target position should be on the the track
+    // The aim is to determine the best way to get back on track and move towards the destination.
+    // A short leash will force the vehicle to regain track sooner before moving on.
+
+    //The leash length is determined by a number of user defined values (USER_WP_SPEED, USER_WP_ACCELL and USER_POS_XY_KP)
     float leash_xy = _pos_control.get_leash_xy();
     float leash_z;
-    if (track_error.z >= 0) {
+    // If the vehicle is above or below the track, we have two different leashes lengths.
+    if (track_error.z >= 0)
+    	{
         leash_z = _pos_control.get_leash_up_z();
-    }else{
+    	}
+    else
+    	{
         leash_z = _pos_control.get_leash_down_z();
-    }
+    	}
 
-    // calculate how far along the track we could move the intermediate target before reaching the end of the leash
-    track_leash_slack = min(_track_leash_length*(leash_z-track_error_z)/leash_z, _track_leash_length*(leash_xy-track_error_xy)/leash_xy);
-    if (track_leash_slack < 0) {
+    // calculate how far along the track we could move the new target position before reaching the end of the leash
+    track_leash_slack = min(_track_leash_length*(leash_z-track_error_z)/leash_z ,
+    							_track_leash_length*(leash_xy-track_error_xy)/leash_xy);
+
+    if (track_leash_slack < 0)
+    	{
         track_desired_max = track_covered;
-    }else{
+    	}
+    else{
         track_desired_max = track_covered + track_leash_slack;
-    }
+    	}
 
-    // check if target is already beyond the leash
+    // If the vehicle is off track by a distance greater then the leash, then we have special case.
+    // We want to then head directly (at 90 deg towards the track) to regain track.
+   // So check if target is beyond the leash
     if (_track_desired > track_desired_max) {
         reached_leash_limit = true;
     }
 
-    // get current velocity
-    const Vector3f &curr_vel = _inav.get_velocity();
-    // get speed along track
-    float speed_along_track = curr_vel.x * _pos_delta_unit.x + curr_vel.y * _pos_delta_unit.y + curr_vel.z * _pos_delta_unit.z;
+    // The next stage is to work out the desired velocity that we want the vehicle to move at along the track
 
+    // Get current velocity
+    // This is the vehicles velocity x,y,z relative to the earth (Earth frame - ef)
+    const Vector3f &curr_vel = _inav.get_velocity();
+
+    // We want to know the vehicles velocity along the track, not in the x,y,z - ef
+    // _pos_delta is the % of each axis that makes up the track from origin to destination.
+    // If the track is 45 deg, x axis and y axis would be 50% each,
+    // If the track was 30 deg, x and y would be ~ 60% and 30%
+
+    float vel_along_track = curr_vel.x * _pos_delta_unit.x +
+    							curr_vel.y * _pos_delta_unit.y +
+									curr_vel.z * _pos_delta_unit.z;
+
+    //this comment below is strange, cant work out what the diff is
     // calculate point at which velocity switches from linear to sqrt
+
+    // _wp_speed_cms is the user defined maximum velocity, comes from the WPNAV_SPEED setting.
+    // it can be overridden at run time by AC_WPNav::set_speed_xy()
+    // linear_verlocity - this is the velocity in the horizontal plane (xy), its ignores the vertical (z).
+    // Could use a better variable name
     float linear_velocity = _wp_speed_cms;
+
+    // kP is the user defined POS_XY_P value.
+    // its is the proportional gain applied to the position error to derive a desired velocity.
     float kP = _pos_control.get_pos_xy_kP();
     if (kP >= 0.0f) {   // avoid divide by zero
         linear_velocity = _track_accel/kP;
     }
 
     // let the limited_speed_xy_cms be some range above or below current velocity along track
-    if (speed_along_track < -linear_velocity) {
-        // we are traveling fast in the opposite direction of travel to the waypoint so do not move the intermediate point
+    if (vel_along_track < -linear_velocity) {
+        // we are traveling in the opposite direction of travel to the waypoint so do not move the target point
         _limited_speed_xy_cms = 0;
     }else{
         // increase intermediate target point's velocity if not yet at the leash limit
@@ -531,8 +603,8 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
         }
 
         // if our current velocity is within the linear velocity range limit the intermediate point's velocity to be no more than the linear_velocity above or below our current velocity
-        if (fabsf(speed_along_track) < linear_velocity) {
-            _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms,speed_along_track-linear_velocity,speed_along_track+linear_velocity);
+        if (fabsf(vel_along_track) < linear_velocity) {
+            _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms,vel_along_track-linear_velocity,vel_along_track+linear_velocity);
         }
     }
     // advance the current target
