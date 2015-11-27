@@ -457,20 +457,25 @@ void AC_WPNav::get_wp_stopping_point_xy(Vector3f& stopping_point) const
 /// **********************************************************************************************
 /// move a target point along track from origin to destination
 /// This is here the magic happens in the wp code.
-/// It determines the required heading and speed that the vehicle should adopt to
-/// advance along the track and reach the destination.
-/// Called on a schedule by AC_WPNav.update_nav()
+/// It determines the new position for the target. the AC_Pos code will then make the vehicle move
+/// towards that target.
+/// As the vehicle gets close to the target, the target will move away along the track.
+/// The target can only move to the extents of the leash.
+/// The leash is the maximum distance between the vehicle and target.
+///
+/// Called on a schedule by AC_WPNav.update_nav().
+
 void AC_WPNav::advance_wp_target_along_track(float dt)
 {
 	// distance (cm) along the track from the origin that the vehicle has traveled. This ignores the track error.
-	float track_covered;
+	float track_distance_covered;
 
 	// distance error (cm) from the track position and the vehicle ( how far off track the vehicle is sitting)
 	Vector3f track_error;
 
 	// the farthest distance (cm) ahead of the vehicles present track position that the next target position can lie.
 	// This ignores track error.
-    float track_desired_max;
+    float next_target_position_on_track_max;
 
     // distance (cm)ahead of the vehicles present track position that the next target position can lie .
     // This takes into account the vehicles present track error.
@@ -490,10 +495,10 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
     // calculate how far along the track the vehicle is positioned.
     // It could be several meters to one side of track due to drift.
     // We want to know the distance along the track that the vehicle has moved ignoring the track error.
-    track_covered = curr_delta.x * _pos_delta_unit.x + curr_delta.y * _pos_delta_unit.y + curr_delta.z * _pos_delta_unit.z;
+    track_distance_covered = curr_delta.x * _pos_delta_unit.x + curr_delta.y * _pos_delta_unit.y + curr_delta.z * _pos_delta_unit.z;
 
     // The point on the track where the vehicle would be sitting if we ignored the track error.
-    Vector3f track_covered_pos = _pos_delta_unit * track_covered;
+    Vector3f track_covered_pos = _pos_delta_unit * track_distance_covered;
 
 
     // Knowing how far along the track the vehicle is, We can calculate how far off track it is.
@@ -534,42 +539,48 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
 
     if (track_leash_slack < 0)
     	{
-        track_desired_max = track_covered;
+        next_target_position_on_track_max = track_distance_covered;
     	}
     else{
-        track_desired_max = track_covered + track_leash_slack;
+        next_target_position_on_track_max = track_distance_covered + track_leash_slack;
     	}
 
     // If the vehicle is off track by a distance greater then the leash, then we have special case.
     // We want to then head directly (at 90 deg towards the track) to regain track.
    // So check if target is beyond the leash
-    if (_track_desired > track_desired_max) {
+    if (_track_desired > next_target_position_on_track_max) {
         reached_leash_limit = true;
     }
 
     // The next stage is to work out the desired velocity that we want the vehicle to move at along the track
 
     // Get current velocity
-    // This is the vehicles velocity x,y,z relative to the earth (Earth frame - ef)
+    // This is the vehicles velocity in x,y,z relative to the earth (Earth frame - ef)
+    // x is the latitude (North bound =  pos - South bound = neg)
+    // y is the longitude ( East bound = pos - West bound =  neg)
+    // z is the climb rate (Up is positive, Down is neg)
     const Vector3f &curr_vel = _inav.get_velocity();
 
     // We want to know the vehicles velocity along the track, not in the x,y,z - ef
     // _pos_delta is the % of each axis that makes up the track from origin to destination.
-    // If the track is 45 deg, x axis and y axis would be 50% each,
-    // If the track was 30 deg, x and y would be ~ 60% and 30%
+    // If the track is North-East, X axis and Y axis would be 50% each,
+    // If the track is South-East, X axis is -50% and Y axis is 50%
 
+    // if Vel_along_track is positive, we are heading towards the destination ( A good thing)
+    // if negative we are heading back to the origin ( Something is not going well here!)
     float vel_along_track = curr_vel.x * _pos_delta_unit.x +
     							curr_vel.y * _pos_delta_unit.y +
 									curr_vel.z * _pos_delta_unit.z;
 
-    //this comment below is strange, can't work out what the diff is
+    // this comment below is strange, can't work out what the diff is
     // calculate point at which velocity switches from linear to sqrt
 
-    // _wp_speed_cms is the user defined maximum horizontal velocity, comes from the WPNAV_SPEED setting.
+    // _wp_speed_cms is the user defined maximum track velocity, comes from the WPNAV_SPEED setting.
     // it can be overridden at run time by AC_WPNav::set_speed_xy()
-    // linear_verlocity - this is the desired velocity in the horizontal plane (xy), its ignores the vertical (z).
-    // Could use a better variable name . vel_desired_xy
-    float linear_velocity = _wp_speed_cms;
+    //
+    // vel_desired_along_track - this is the desired velocity in the horizontal plane (xy), its ignores the vertical (z).
+    // and is always positive in value (direction-less)
+    float vel_desired_along_track = _wp_speed_cms;
 
     // kP is the user defined POS_XY_P value.
     // its is the proportional gain applied to the position error to derive a desired velocity.
@@ -577,17 +588,28 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
 
     // _track_accel has been pre-defined by the call to AC_WPNav::calculate_wp_leash_length
     // if we have defined a kP greater than zero, then we will calculate the desired velocity by dividing
-    // the accel by the kP. I don't see whay we want to do this when we have the desired velocity defined above.
-    //
+    // the accel by the kP. I don't see why we want to do this when we have the desired velocity defined above.
+
     if (kP >= 0.0f) {   // avoid divide by zero
-        linear_velocity = _track_accel/kP;
+        vel_desired_along_track = _track_accel/kP;
     }
 
     // let the limited_speed_xy_cms be some range above or below current velocity along track
-    if (vel_along_track < -linear_velocity) {
-        // we are traveling in the opposite direction of travel to the waypoint so do not move the target point
+    // old code ->
+    // if (vel_along_track < -vel_desired_along_track) {
+    // if the vel_along_track is negative ( below zero ), we may be heading back towards the origin,
+    // we may also have just gotten a bad result or the vehicle has slipped back just slightly due to gust of wind.
+    // We need a bit of tolerance before we panic and change things.
+    // We can use the negative value of vel_desired_along_track to create a lower limit and add some tolerance.
+    float vel_along_track_lower_limit = -(vel_desired_along_track);
+
+    if (vel_along_track < vel_along_track_lower_limit)
+    	{
+        // we are defiantly traveling back towards the origin - We don't want that!! Now we can panic!!!!
         _limited_speed_xy_cms = 0;
-    }else{
+    	}
+    else
+    	{
         // increase intermediate target point's velocity if not yet at the leash limit
         if(dt > 0 && !reached_leash_limit) {
             _limited_speed_xy_cms += 2.0f * _track_accel * dt;
@@ -608,8 +630,8 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
         }
 
         // if our current velocity is within the linear velocity range limit the intermediate point's velocity to be no more than the linear_velocity above or below our current velocity
-        if (fabsf(vel_along_track) < linear_velocity) {
-            _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms,vel_along_track-linear_velocity,vel_along_track+linear_velocity);
+        if (fabsf(vel_along_track) < vel_desired_along_track) {
+            _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms,vel_along_track-vel_desired_along_track,vel_along_track+vel_desired_along_track);
         }
     }
     // advance the current target
@@ -617,8 +639,8 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
     	_track_desired += _limited_speed_xy_cms * dt;
 
     	// reduce speed if we reach end of leash
-        if (_track_desired > track_desired_max) {
-        	_track_desired = track_desired_max;
+        if (_track_desired > next_target_position_on_track_max) {
+        	_track_desired = next_target_position_on_track_max;
         	_limited_speed_xy_cms -= 2.0f * _track_accel * dt;
         	if (_limited_speed_xy_cms < 0.0f) {
         	    _limited_speed_xy_cms = 0.0f;
@@ -666,38 +688,61 @@ int32_t AC_WPNav::get_wp_bearing_to_destination() const
 {
     return get_bearing_cd(_inav.get_position(), _destination);
 }
-
-/// update_wpnav - run the wp controller - should be called at 100hz or higher
+/// ******************************************************************************
+///
+/// 								update_wpnav -
+///
+/// ******************************************************************************
+//run the wp controller - should be called at 100hz or higher (10 ms or less)
 void AC_WPNav::update_wpnav()
 {
-    // calculate dt
-    uint32_t now = hal.scheduler->millis();
+    // calculate dt - result will be in seconds
+	// _wp_last_update is stoed in  milli seconds
+	uint32_t now = hal.scheduler->millis();
     float dt = (now - _wp_last_update) / 1000.0f;
 
+
     // reset step back to 0 if 0.1 seconds has passed and we completed the last full cycle
-    if (dt >= WPNAV_WP_UPDATE_TIME) {
-        // double check dt is reasonable
-        if (dt >= 1.0f) {
-            dt = 0.0;
-        }
-        // capture time since last iteration
-        _wp_last_update = now;
+
+    // the APM defines a update rate of 0.095 seconds ( dont know what it is not 0.1 seconds (10hz)
+    // the Pixhawk is using 0.02 seconds or (50hz) - since it has processing power.
+
+    if (dt >= WPNAV_WP_UPDATE_TIME)
+    	{
+
+    	// capture time since last iteration
+    	_wp_last_update = now;
+
+    	 // double check dt is reasonable
+    	// If for some reason we have missed the timing slot and dt has gotten too big,
+    	// we will reset dt to 0.
+    	// dt is passed into advance_wp_target_along_track and used to advance the target along the track
+    	// and set the desired velocity.
+    	// If it is too big we can get errors.
+        if (dt >= 1.0f) dt = 0.0;
 
         // advance the target if necessary
         advance_wp_target_along_track(dt);
+
+        // Indicate to the position controller that there may be a new target for it to track
         _pos_control.trigger_xy();
-        if (_flags.new_wp_destination) {
+
+
+        if (_flags.new_wp_destination)
+        	{
             _flags.new_wp_destination = false;
             _pos_control.freeze_ff_xy();
-        }
+        	}
         _pos_control.freeze_ff_z();
-    }else{
+    	}
+    else
+    	{
         // run horizontal position controller
         _pos_control.update_xy_controller(false);
 
         // check if leash lengths need updating
         check_wp_leash_length();
-    }
+    	}
 }
 
 // check_wp_leash_length - check if waypoint leash lengths need to be recalculated
@@ -715,6 +760,7 @@ void AC_WPNav::calculate_wp_leash_length()
 {
     // length of the unit direction vector in the horizontal
     float pos_delta_unit_xy = pythagorous2(_pos_delta_unit.x, _pos_delta_unit.y);
+
     float pos_delta_unit_z = fabsf(_pos_delta_unit.z);
 
     float speed_z;
