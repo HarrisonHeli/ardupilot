@@ -2,9 +2,8 @@
 # vi: set ft=ruby :
 
 Vagrant::Config.run do |config|
-  config.vm.box = "ubuntu-12.04-32bit"
-  config.vm.box_url = "http://files.vagrantup.com/precise32.box"
-
+  config.vm.box = "ubuntu/trusty64"
+  
   config.vm.share_folder("ardupilot", "/home/vagrant/ardupilot", ".")
 
   # Allow symlinks

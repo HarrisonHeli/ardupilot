@@ -22,7 +22,7 @@ ifeq ($(wildcard $(NUTTX_SRC)/configs),)
 NUTTX_SRC := $(shell cd $(SKETCHBOOK)/$(NUTTX_SRC) && pwd)/
 endif
 
-ifeq ($(wildcard $(NUTTX_SRC)configs),)
+ifeq ($(wildcard $(NUTTX_SRC)/configs),)
 $(error ERROR: NUTTX_SRC not set correctly - no configs directory found)
 endif
 
