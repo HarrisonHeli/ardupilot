@@ -863,30 +863,47 @@ void AC_PosControl::lean_angles_to_accel(float& accel_x_cmss, float& accel_y_cms
     accel_x_cmss = (GRAVITY_MSS * 100) * (-(_ahrs.cos_yaw() * _ahrs.sin_pitch() / max(_ahrs.cos_pitch(),0.5f)) - _ahrs.sin_yaw() * _ahrs.sin_roll() / max(_ahrs.cos_roll(),0.5f));
     accel_y_cmss = (GRAVITY_MSS * 100) * (-(_ahrs.sin_yaw() * _ahrs.sin_pitch() / max(_ahrs.cos_pitch(),0.5f)) + _ahrs.cos_yaw() * _ahrs.sin_roll() / max(_ahrs.cos_roll(),0.5f));
 }
+///****************************************************************************************************
+///
+///		AC_PosControl::calc_leash_length
+///
+///****************************************************************************************************
 
 /// calc_leash_length - calculates the horizontal leash length given a maximum speed, acceleration and position kP gain
-float AC_PosControl::calc_leash_length(float speed_cms, float accel_cms, float kP) const
+float AC_PosControl::calc_leash_length(float speed_cms_max, float accel_cms_max, float kP) const
 {
     float leash_length;
 
     // sanity check acceleration and avoid divide by zero
-    if (accel_cms <= 0.0f) {
-        accel_cms = POSCONTROL_ACCELERATION_MIN;
+    if (accel_cms_max <= 0.0f) {
+    	accel_cms_max = POSCONTROL_ACCELERATION_MIN; // 50
     }
+
+    //AH-if kP is zero, the leash length will never be greater then 100cm
+    //Need to see if kP is ever allowed to be zero or less (look at the user range of POS_XY_P)
 
     // avoid divide by zero
     if (kP <= 0.0f) {
-        return POSCONTROL_LEASH_LENGTH_MIN;
+        return POSCONTROL_LEASH_LENGTH_MIN; //100
     }
 
     // calculate leash length
-    if(speed_cms <= accel_cms / kP) {
+    if(speed_cms_max <= accel_cms_max / kP) {
         // linear leash length based on speed close in
-        leash_length = speed_cms / kP;
+        leash_length = speed_cms_max / kP;
     }else{
         // leash length grows at sqrt of speed further out
-        leash_length = (accel_cms / (2.0f*kP*kP)) + (speed_cms*speed_cms / (2.0f*accel_cms));
+        leash_length = (accel_cms_max / (2.0f*kP*kP))
+        				+ (speed_cms_max*speed_cms_max / (2.0f*accel_cms_max));
     }
+
+    // using the default values we should see the following leash length values
+    // kp = 1.0
+    // WP_SPEED = 500 cm/s
+    // WP_ACCEL = 250 cm/s/s
+
+    //	ll = (250 / 1) + (25000 / 500) = 750cm
+
 
     // ensure leash is at least 1m long
     if( leash_length < POSCONTROL_LEASH_LENGTH_MIN ) {

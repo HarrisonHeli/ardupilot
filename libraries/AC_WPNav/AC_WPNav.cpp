@@ -409,6 +409,7 @@ void AC_WPNav::set_wp_origin_and_destination(const Vector3f& origin, const Vecto
 
     // initialise the limited speed to current speed along the track
     const Vector3f &curr_vel = _inav.get_velocity();
+
     // get speed along track (note: we convert vertical speed into horizontal speed equivalent)
     float speed_along_track = curr_vel.x * _pos_delta_unit.x + curr_vel.y * _pos_delta_unit.y + curr_vel.z * _pos_delta_unit.z;
     _limited_speed_xy_cms = constrain_float(speed_along_track,0,_wp_speed_cms);
@@ -459,11 +460,12 @@ void AC_WPNav::get_wp_stopping_point_xy(Vector3f& stopping_point) const
 /// This is here the magic happens in the wp code.
 /// It determines the new position for the target. the AC_Pos code will then make the vehicle move
 /// towards that target.
-/// As the vehicle gets close to the target, the target will move away along the track.
-/// The target can only move to the extents of the leash.
-/// The leash is the maximum distance between the vehicle and target.
+/// As the vehicle gets closer to the target, the target will move away from the vehicle but it will stay on the track.
 ///
-/// Called on a schedule by AC_WPNav.update_nav().
+/// The leash is the maximum distance between the vehicle and target.
+/// The target can only move to the extents of the leash an then it has to stop
+///
+/// Called on a timed schedule by AC_WPNav.update_nav().
 
 void AC_WPNav::advance_wp_target_along_track(float dt)
 {
@@ -509,18 +511,20 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
     // we don't care which of the track it is on. The result will always be positive.
     float track_error_xy = pythagorous2(track_error.x, track_error.y);
 
-    // calculate the vertical track error, as for track_error_xy. It is a positive distance 90 deg from the track.
+    // calculate the vertical track error, as for track_error_xy. It is a vertical and always positive distance from the track.
     float track_error_z = fabsf(track_error.z);
 
 
-    // A leash is a point ahead of the vehicles current position.
-    // That point will always be between the current position and destination.
-    // Think of a dog racing ahead of you trying to get onto the path and head home. you only allow him to go so far on his leash.
-    // Depending on how long the leash is, we can determine when the next target position should be on the the track
-    // The aim is to determine the best way to get back on track and move towards the destination.
+    // A target is a point ahead of the vehicles current position.
+    // That point should always be between the current position and destination.
+    // Think of a dog on a leash racing ahead of you trying to get onto the path and head home.
+    // you only allow him to go so far on his leash.
+    // Depending on how long the leash is, we can determine where the next target position should be on the track
+    // The aim is to determine the best way for the vehicle to get back on track and move towards the destination.
     // A short leash will force the vehicle to regain track sooner before moving on.
 
     //The leash length is determined by a number of user defined values (USER_WP_SPEED, USER_WP_ACCELL and USER_POS_XY_KP)
+
     float leash_xy = _pos_control.get_leash_xy();
     float leash_z;
     // If the vehicle is above or below the track, we have two different leashes lengths.
@@ -690,7 +694,7 @@ int32_t AC_WPNav::get_wp_bearing_to_destination() const
 }
 /// ******************************************************************************
 ///
-/// 								update_wpnav -
+/// 								update_wpnav
 ///
 /// ******************************************************************************
 //run the wp controller - should be called at 100hz or higher (10 ms or less)
@@ -702,9 +706,9 @@ void AC_WPNav::update_wpnav()
     float dt = (now - _wp_last_update) / 1000.0f;
 
 
-    // reset step back to 0 if 0.1 seconds has passed and we completed the last full cycle
 
-    // the APM defines a update rate of 0.095 seconds ( dont know what it is not 0.1 seconds (10hz)
+
+    // the APM defines a update rate of 0.095 seconds ( dont know why it is not rounded to 0.1 seconds (10hz)
     // the Pixhawk is using 0.02 seconds or (50hz) - since it has processing power.
 
     if (dt >= WPNAV_WP_UPDATE_TIME)
@@ -713,9 +717,9 @@ void AC_WPNav::update_wpnav()
     	// capture time since last iteration
     	_wp_last_update = now;
 
-    	 // double check dt is reasonable
+    	// double check dt is reasonable
     	// If for some reason we have missed the timing slot and dt has gotten too big,
-    	// we will reset dt to 0.
+    	// then, we will reset dt to 0.
     	// dt is passed into advance_wp_target_along_track and used to advance the target along the track
     	// and set the desired velocity.
     	// If it is too big we can get errors.
@@ -732,11 +736,13 @@ void AC_WPNav::update_wpnav()
         	{
             _flags.new_wp_destination = false;
             _pos_control.freeze_ff_xy();
+		    _pos_control.freeze_ff_z(); //Moved here by AH, See below
         	}
-        _pos_control.freeze_ff_z();
+        // AH - this in wrong spot - should be above
+        //_pos_control.freeze_ff_z();
     	}
     else
-    	{
+    	{ // Not time to update the target so do other stuff
         // run horizontal position controller
         _pos_control.update_xy_controller(false);
 
