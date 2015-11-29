@@ -99,6 +99,9 @@ static void rtl_climb_start()
     wp_nav.set_wp_destination(destination);
     wp_nav.set_fast_waypoint(true);
 
+    //make the vehicle come back using half the loiter speed
+    wp_nav.set_speed_xy(wp_nav.get_loiter_speed());
+
     // hold current yaw during initial climb
     set_auto_yaw_mode(AUTO_YAW_HOLD);
 }
@@ -121,6 +124,7 @@ static void rtl_return_start()
 #endif
 
     wp_nav.set_wp_destination(destination);
+    wp_nav.set_speed_xy(wp_nav.get_loiter_speed());
 
     // initialise yaw to point home (maybe)
     set_auto_yaw_mode(get_default_auto_yaw_mode(true));

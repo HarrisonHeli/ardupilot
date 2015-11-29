@@ -87,6 +87,9 @@ public:
     /// get_stopping_point - returns vector to stopping point based on a horizontal position and velocity
     void get_loiter_stopping_point_xy(Vector3f& stopping_point) const;
 
+    /// the user defined loiter speed
+    float get_loiter_speed() { return _loiter_speed_cms;}
+
     /// get_loiter_distance_to_target - get horizontal distance to loiter target in cm
     float get_loiter_distance_to_target() const { return _pos_control.get_distance_to_target(); }
 
@@ -273,6 +276,7 @@ protected:
     AP_Float    _loiter_speed_cms;      // maximum horizontal speed in cm/s while in loiter
     AP_Float    _loiter_jerk_max_cmsss; // maximum jerk in cm/s/s/s while in loiter
     AP_Float    _wp_speed_cms;          // maximum horizontal speed in cm/s during missions
+    AP_Float	_wp_speed_cms_init;		// The initial wp_speed. The one above could be overwritten by control_rtl
     AP_Float    _wp_speed_up_cms;       // climb speed target in cm/s
     AP_Float    _wp_speed_down_cms;     // descent speed target in cm/s
     AP_Float    _wp_radius_cm;          // distance from a waypoint in cm that, when crossed, indicates the wp has been reached
