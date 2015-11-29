@@ -610,7 +610,9 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
     if (vel_along_track < vel_along_track_lower_limit)
     	{
         // we are defiantly traveling back towards the origin - We don't want that!! Now we can panic!!!!
-        _limited_speed_xy_cms = 0;
+        //_limited_speed_xy_cms = 0;
+    	_limited_speed_xy_cms = _track_speed * 0.1f; //Ah- i think this is creating a stall at lower wp_speeds
+
     	}
     else
     	{
