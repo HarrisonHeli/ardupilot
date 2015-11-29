@@ -588,15 +588,15 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
 
     // kP is the user defined POS_XY_P value.
     // its is the proportional gain applied to the position error to derive a desired velocity.
-    float kP = _pos_control.get_pos_xy_kP();
+    //float kP = _pos_control.get_pos_xy_kP();
 
     // _track_accel has been pre-defined by the call to AC_WPNav::calculate_wp_leash_length
     // if we have defined a kP greater than zero, then we will calculate the desired velocity by dividing
     // the accel by the kP. I don't see why we want to do this when we have the desired velocity defined above.
 
-    if (kP >= 0.0f) {   // avoid divide by zero
-        vel_desired_along_track = _track_accel/kP;
-    }
+    //if (kP >= 0.0f) {   // avoid divide by zero
+    //  vel_desired_along_track = _track_accel/kP;
+    //}
 
     // let the limited_speed_xy_cms be some range above or below current velocity along track
     // old code ->
@@ -784,7 +784,7 @@ void AC_WPNav::calculate_wp_leash_length()
         _track_accel = 0;
         _track_speed = 0;
         _track_leash_length = WPNAV_LEASH_LENGTH_MIN;
-    }else if(_pos_delta_unit.z == 0){
+    }else if(_pos_delta_unit.z <= 0.2f){
         _track_accel = _wp_accel_cms/pos_delta_unit_xy;
         _track_speed = _wp_speed_cms/pos_delta_unit_xy;
         _track_leash_length = _pos_control.get_leash_xy()/pos_delta_unit_xy;
