@@ -568,49 +568,33 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
 
     // We want to know the vehicles velocity along the track, not in the x,y,z - ef
     // _pos_delta is the % of each axis that makes up the track from origin to destination.
-    // If the track is North-East, X axis and Y axis would be 50% each,
+    // If the track is North-East, X axis and Y axis would be 50% each (0.5f),
     // If the track is South-East, X axis is -50% and Y axis is 50%
 
-    // if Vel_along_track is positive, we are heading towards the destination ( A good thing)
+    // if speed_along_track is positive, we are heading towards the destination ( A good thing)
     // if negative we are heading back to the origin ( Something is not going well here!)
-    float vel_along_track = curr_vel.x * _pos_delta_unit.x +
+    float speed_along_track = curr_vel.x * _pos_delta_unit.x +
     							curr_vel.y * _pos_delta_unit.y +
 									curr_vel.z * _pos_delta_unit.z;
 
-    // this comment below is strange, can't work out what the diff is
-    // calculate point at which velocity switches from linear to sqrt
-
-    // _wp_speed_cms is the user defined maximum track velocity, comes from the WPNAV_SPEED setting.
+   
+    // _wp_speed_cms is the user defined maximum track speed, comes from the WPNAV_SPEED setting.
     // it can be overridden at run time by AC_WPNav::set_speed_xy()
     //
-    // vel_desired_along_track - this is the desired velocity in the horizontal plane (xy), its ignores the vertical (z).
+    // speed_desired_along_track - this is the desired speed in the horizontal plane (xy), its ignores the vertical (z).
     // and is always positive in value (direction-less)
-    float vel_desired_along_track = _wp_speed_cms;
+    float speed_desired_along_track = _wp_speed_cms;
 
-    // kP is the user defined POS_XY_P value.
-    // its is the proportional gain applied to the position error to derive a desired velocity.
-    //float kP = _pos_control.get_pos_xy_kP();
-
-    // _track_accel has been pre-defined by the call to AC_WPNav::calculate_wp_leash_length
-    // if we have defined a kP greater than zero, then we will calculate the desired velocity by dividing
-    // the accel by the kP. I don't see why we want to do this when we have the desired velocity defined above.
-
-    //if (kP >= 0.0f) {   // avoid divide by zero
-    //  vel_desired_along_track = _track_accel/kP;
-    //}
-
-    // let the limited_speed_xy_cms be some range above or below current velocity along track
-    // old code ->
-    // if (vel_along_track < -vel_desired_along_track) {
+   
     // if the vel_along_track is negative ( below zero ), we may be heading back towards the origin,
     // we may also have just gotten a bad result or the vehicle has slipped back just slightly due to gust of wind.
     // We need a bit of tolerance before we panic and change things.
     // We can use the negative value of vel_desired_along_track to create a lower limit and add some tolerance.
-    float vel_along_track_lower_limit = -(vel_desired_along_track);
+    float speed_along_track_lower_limit = -(speed_desired_along_track);
 
-    if (vel_along_track < vel_along_track_lower_limit)
+    if (speed_along_track < speed_along_track_lower_limit)
     	{
-        // we are defiantly traveling back towards the origin - We don't want that!! Now we can panic!!!!
+        // we are traveling back towards the origin - We don't want that!! Now we can panic!!!!
         //_limited_speed_xy_cms = 0;
     	_limited_speed_xy_cms = _track_speed * 0.1f; //Ah- i think this is creating a stall at lower wp_speeds
 
@@ -618,42 +602,53 @@ void AC_WPNav::advance_wp_target_along_track(float dt)
     else
     	{
         // increase intermediate target point's velocity if not yet at the leash limit
-        if(dt > 0 && !reached_leash_limit) {
+        if(dt > 0 && !reached_leash_limit) 
+        	{
             _limited_speed_xy_cms += 2.0f * _track_accel * dt;
-        }
+        	}
+        
         // do not allow speed to be below zero or over top speed
         _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms, 0.0f, _track_speed);
 
         // check if we should begin slowing down
-        if (!_flags.fast_waypoint) {
+        if (!_flags.fast_waypoint) 
+        	{
             float dist_to_dest = _track_length - _track_desired;
-            if (!_flags.slowing_down && dist_to_dest <= _slow_down_dist) {
+            
+            if (!_flags.slowing_down && dist_to_dest <= _slow_down_dist) 
+            	{
                 _flags.slowing_down = true;
-            }
+            	}
             // if target is slowing down, limit the speed
-            if (_flags.slowing_down) {
+            if (_flags.slowing_down) 
+            	{
                 _limited_speed_xy_cms = min(_limited_speed_xy_cms, get_slow_down_speed(dist_to_dest, _track_accel));
-            }
-        }
+            	}
+        	}
 
         // if our current velocity is within the linear velocity range limit the intermediate point's velocity to be no more than the linear_velocity above or below our current velocity
-        if (fabsf(vel_along_track) < vel_desired_along_track) {
-            _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms,vel_along_track-vel_desired_along_track,vel_along_track+vel_desired_along_track);
-        }
-    }
+        if (fabsf(speed_along_track) < speed_desired_along_track)
+        	{
+            _limited_speed_xy_cms = constrain_float(_limited_speed_xy_cms,
+            											speed_along_track-speed_desired_along_track,
+															speed_along_track + speed_desired_along_track );
+        	}
+    	}
+    
     // advance the current target
-    if (!reached_leash_limit) {
+    if (!reached_leash_limit)
+    	{
     	_track_desired += _limited_speed_xy_cms * dt;
 
     	// reduce speed if we reach end of leash
-        if (_track_desired > next_target_position_on_track_max) {
+        if (_track_desired > next_target_position_on_track_max)
+        	{
         	_track_desired = next_target_position_on_track_max;
         	_limited_speed_xy_cms -= 2.0f * _track_accel * dt;
-        	if (_limited_speed_xy_cms < 0.0f) {
-        	    _limited_speed_xy_cms = 0.0f;
+
+        	if (_limited_speed_xy_cms < 0.0f) _limited_speed_xy_cms = 0.0f;
         	}
     	}
-    }
 
     // do not let desired point go past the end of the track unless it's a fast waypoint
     if (!_flags.fast_waypoint) {
